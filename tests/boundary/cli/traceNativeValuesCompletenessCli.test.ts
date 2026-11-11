@@ -161,6 +161,7 @@ it("reports the CLI last page and its observed node budget separately", async ()
   expect(capped.unknowns).toContainEqual({
     procedure: "0x3000",
     address: null,
+    related_procedure: null,
     reason: "Node budget reached",
   });
 });
@@ -254,6 +255,7 @@ it.each([
     expect(admitted.unknowns).toContainEqual({
       procedure: "0x2000",
       address: null,
+      related_procedure: null,
       reason: CLEANUP_STOPPED_VALUE_TRACE,
     });
   },
