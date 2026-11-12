@@ -65,16 +65,18 @@ it("marks truncated DNS responses (TC bit) as incomplete but keeps assigned addr
 
 it("does not attribute addresses on NXDOMAIN (nonzero RCODE)", () => {
   const query = label("612e62", "6578616d706c65");
+  const answer = rr(query, 1, address);
   const bytes = Buffer.concat([
     word(1),
     word(0x8183), // QR=1, RCODE=3 (NXDOMAIN)
     word(1),
-    word(0),
+    word(1),
     word(0),
     word(0),
     query,
     word(1),
     word(1),
+    ...[answer],
   ]);
   const facts = parse(bytes);
   expect(facts).toMatchObject({
@@ -82,6 +84,9 @@ it("does not attribute addresses on NXDOMAIN (nonzero RCODE)", () => {
     unattributed: ["192.0.2.9"],
     incomplete: true,
   });
+  expect(facts.incomplete_reasons).toContainEqual(
+    expect.stringContaining("RCODE"),
+  );
 });
 
 it("does not attribute addresses on non-QUERY opcode", () => {
