@@ -268,17 +268,40 @@ const decodeRecords = (
 const eligibleQuestion = (
   decodedQuestions: readonly WireQuestion[],
   flags: number,
-): WireQuestion | null => {
+): { question: WireQuestion | null; reason: string | null } => {
   const question = decodedQuestions[0];
-  if (
-    (flags & 0x8000) === 0 ||
-    decodedQuestions.length !== 1 ||
-    question === undefined ||
-    ![1, 255].includes(question.dnsClass) ||
-    ![1, 28, 255].includes(question.type)
-  )
-    return null;
-  return question;
+  // QR bit must be set (response, not query).
+  if ((flags & 0x8000) === 0)
+    return { question: null, reason: "DNS response flag (QR) is not set" };
+  // RCODE must be zero (no error response such as NXDOMAIN).
+  if ((flags & 0x000f) !== 0)
+    return {
+      question: null,
+      reason: `DNS response RCODE is nonzero (${flags & 0x000f}); error response such as NXDOMAIN`,
+    };
+  // OPCODE must be QUERY (0); unsupported opcodes (STATUS, IQUERY, NOTIFY, ...)
+  // do not establish ordinary successful-query address ownership.
+  if ((flags & 0x7800) !== 0)
+    return {
+      question: null,
+      reason: `DNS OPCODE is not QUERY (${(flags & 0x7800) >> 11})`,
+    };
+  if (decodedQuestions.length !== 1 || question === undefined)
+    return {
+      question: null,
+      reason: "Question count does not establish Internet address ownership",
+    };
+  if (![1, 255].includes(question.dnsClass))
+    return {
+      question: null,
+      reason: "Question class does not establish Internet address ownership",
+    };
+  if (![1, 28, 255].includes(question.type))
+    return {
+      question: null,
+      reason: "Question type does not establish Internet address ownership",
+    };
+  return { question, reason: null };
 };
 
 const attributeAddresses = (
@@ -286,20 +309,32 @@ const attributeAddresses = (
   question: WireQuestion | null,
   records: readonly RecordFact[],
   observed: readonly ObservedAddress[],
+  flags: number = 0,
+  family: "dns" | "mdns" | "llmnr" = "dns",
+  ineligibleReason: string | null = null,
 ): DnsMessageFacts => {
-  const unknown = (reason: string): DnsMessageFacts => ({
+  const unknown = (reasons: readonly string[]): DnsMessageFacts => ({
     questions,
     assigned: [],
     unattributed: observed.map((entry) => entry.value),
     incomplete: true,
-    incomplete_reasons: [reason],
+    incomplete_reasons: [...reasons],
   });
   if (observed.length === 0)
     return { questions, assigned: [], unattributed: [], incomplete: false };
-  if (question === null)
-    return unknown(
-      "Question count, response flag, type or class does not establish Internet address ownership",
-    );
+  if (question === null) {
+    const truncated =
+      (family === "dns" || family === "llmnr") && (flags & 0x0200) !== 0;
+    const reasons: string[] = [
+      ineligibleReason ??
+        "Question count, response flag, type or class does not establish Internet address ownership",
+    ];
+    if (truncated)
+      reasons.push(
+        "DNS response is truncated (TC bit set); retained records may be incomplete",
+      );
+    return unknown(reasons);
+  };
   const links = new Map<string, Set<string>>();
   for (const record of records) {
     if (record.answer && record.type === 5 && record.dnsClass === 1) {
@@ -338,17 +373,24 @@ const attributeAddresses = (
       assigned.push([0, record.address]);
     else unattributed.push(record.address);
   }
+  // Conventional DNS and LLMNR truncation (TC bit) must stay visible even
+  // when every retained record parses; mDNS keeps its distinct TC semantics.
+  const truncated = (family === "dns" || family === "llmnr") && (flags & 0x0200) !== 0;
+  const reasons: string[] = [];
+  if (truncated)
+    reasons.push(
+      "DNS response is truncated (TC bit set); retained records may be incomplete",
+    );
+  if (unattributed.length > 0)
+    reasons.push(
+      "Some producer addresses lack proven ownership by the question's Internet answer chain",
+    );
   return {
     questions,
     assigned,
     unattributed,
-    incomplete: unattributed.length > 0,
-    incomplete_reasons:
-      unattributed.length > 0
-        ? [
-            "Some producer addresses lack proven ownership by the question's Internet answer chain",
-          ]
-        : [],
+    incomplete: truncated || unattributed.length > 0,
+    incomplete_reasons: reasons,
   };
 };
 
@@ -424,10 +466,14 @@ export const parseDnsMessageRaw = (
   }));
   const records = decodeRecords(message, at, classValue, observed);
   if (!records.ok) return unknown(records.error.reason);
+  const eligibility = eligibleQuestion(decodedQuestions, flags);
   return attributeAddresses(
     questions,
-    eligibleQuestion(decodedQuestions, flags),
+    eligibility.question,
     records.value,
     observed,
+    flags,
+    family,
+    eligibility.reason,
   );
 };
