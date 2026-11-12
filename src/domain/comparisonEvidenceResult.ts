@@ -6,6 +6,7 @@ import type { ComparisonEvidenceOperation } from "./comparisonEvidenceIdentity.j
 import type { Evidence } from "./evidence.js";
 import { EvidenceIntegrityError } from "./evidenceErrors.js";
 import { readEvidencePayload } from "./evidenceValidation.js";
+import { functionComparisonFindingLinks } from "./functionComparisonResults.js";
 import {
   functionComparisonResultSchema,
   type FunctionComparisonResult,
@@ -59,6 +60,8 @@ export function readComparisonResult(
       evidence.normalized_result,
     );
     if (!parsed.ok) return parsed;
+    const optIn = validateNormalizedViewOptIn(evidence, parsed.value);
+    if (!optIn.ok) return optIn;
     if (parsed.value.function_match.method === "same-evidence") {
       try {
         const { left, right } = comparisonSourceEvidenceSides(evidence);
@@ -94,9 +97,11 @@ export function readComparisonResult(
     }
     const links = validateFindingLinks(
       evidence,
-      parsed.value.dimensions.flatMap(({ evidence_links }) => evidence_links),
+      functionComparisonFindingLinks(parsed.value),
     );
     if (!links.ok) return links;
+    const sources = validateNormalizedViewSources(evidence, parsed.value);
+    if (!sources.ok) return sources;
     return ok({ operation, evidence, result: parsed.value });
   }
   const parsed = readEvidencePayload(
@@ -111,6 +116,42 @@ export function readComparisonResult(
   if (!links.ok) return links;
   return ok({ operation, evidence, result: parsed.value });
 }
+
+/** The recorded caller opt-in, not the payload, decides whether views exist. */
+const validateNormalizedViewOptIn = (
+  evidence: Evidence,
+  result: FunctionComparisonResult,
+): Result<void, EvidenceIntegrityError> =>
+  (evidence.parameters["include_normalized_views"] === true) ===
+  (result.normalized_views !== undefined)
+    ? ok(undefined)
+    : err(
+        new EvidenceIntegrityError(
+          "Function comparison normalized views disagree with the recorded include_normalized_views selection",
+        ),
+      );
+
+/** Each normalized view must cite both recorded source selections. */
+const validateNormalizedViewSources = (
+  evidence: Evidence,
+  result: FunctionComparisonResult,
+): Result<void, EvidenceIntegrityError> => {
+  const sources = [
+    evidence.parameters["left_evidence_id"],
+    evidence.parameters["right_evidence_id"],
+  ];
+  return (result.normalized_views?.views ?? []).every(({ evidence_links }) =>
+    sources.every(
+      (source) => typeof source === "string" && evidence_links.includes(source),
+    ),
+  )
+    ? ok(undefined)
+    : err(
+        new EvidenceIntegrityError(
+          "Function comparison normalized views must cite both selected source Evidence records",
+        ),
+      );
+};
 
 const validateFindingLinks = (
   evidence: Evidence,
