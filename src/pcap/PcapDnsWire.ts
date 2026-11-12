@@ -270,8 +270,14 @@ const eligibleQuestion = (
   flags: number,
 ): WireQuestion | null => {
   const question = decodedQuestions[0];
+  // QR bit must be set (response, not query).
+  // RCODE must be zero (no error response such as NXDOMAIN).
+  // OPCODE must be QUERY (0); unsupported opcodes (STATUS, IQUERY, NOTIFY, ...)
+  // do not establish ordinary successful-query address ownership.
   if (
     (flags & 0x8000) === 0 ||
+    (flags & 0x000f) !== 0 ||
+    (flags & 0x7800) !== 0 ||
     decodedQuestions.length !== 1 ||
     question === undefined ||
     ![1, 255].includes(question.dnsClass) ||
@@ -286,6 +292,8 @@ const attributeAddresses = (
   question: WireQuestion | null,
   records: readonly RecordFact[],
   observed: readonly ObservedAddress[],
+  flags: number = 0,
+  family: "dns" | "mdns" | "llmnr" = "dns",
 ): DnsMessageFacts => {
   const unknown = (reason: string): DnsMessageFacts => ({
     questions,
@@ -338,17 +346,24 @@ const attributeAddresses = (
       assigned.push([0, record.address]);
     else unattributed.push(record.address);
   }
+  // Conventional DNS and LLMNR truncation (TC bit) must stay visible even
+  // when every retained record parses; mDNS keeps its distinct TC semantics.
+  const truncated = (family === "dns" || family === "llmnr") && (flags & 0x0200) !== 0;
+  const reasons: string[] = [];
+  if (truncated)
+    reasons.push(
+      "DNS response is truncated (TC bit set); retained records may be incomplete",
+    );
+  if (unattributed.length > 0)
+    reasons.push(
+      "Some producer addresses lack proven ownership by the question's Internet answer chain",
+    );
   return {
     questions,
     assigned,
     unattributed,
-    incomplete: unattributed.length > 0,
-    incomplete_reasons:
-      unattributed.length > 0
-        ? [
-            "Some producer addresses lack proven ownership by the question's Internet answer chain",
-          ]
-        : [],
+    incomplete: truncated || unattributed.length > 0,
+    incomplete_reasons: reasons,
   };
 };
 
@@ -429,5 +444,7 @@ export const parseDnsMessageRaw = (
     eligibleQuestion(decodedQuestions, flags),
     records.value,
     observed,
+    flags,
+    family,
   );
 };

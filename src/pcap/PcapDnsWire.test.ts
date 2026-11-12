@@ -37,6 +37,76 @@ it("preserves real TShark display collisions with distinct wire label identities
     });
 });
 
+it("marks truncated DNS responses (TC bit) as incomplete but keeps assigned addresses", () => {
+  const query = label("612e62", "6578616d706c65");
+  const answer = rr(query, 1, address);
+  // TC bit (0x0200) set on a standard QUERY response
+  const bytes = Buffer.concat([
+    word(1),
+    word(0x8380), // QR=1, TC=1, RD=1
+    word(1),
+    word(1),
+    word(0),
+    word(0),
+    query,
+    word(1),
+    word(1),
+    ...[answer],
+  ]);
+  const facts = parse(bytes);
+  expect(facts).toMatchObject({
+    assigned: [[0, "192.0.2.9"]],
+    incomplete: true,
+  });
+  expect(facts.incomplete_reasons).toContainEqual(
+    expect.stringContaining("truncated"),
+  );
+});
+
+it("does not attribute addresses on NXDOMAIN (nonzero RCODE)", () => {
+  const query = label("612e62", "6578616d706c65");
+  const bytes = Buffer.concat([
+    word(1),
+    word(0x8183), // QR=1, RCODE=3 (NXDOMAIN)
+    word(1),
+    word(0),
+    word(0),
+    word(0),
+    query,
+    word(1),
+    word(1),
+  ]);
+  const facts = parse(bytes);
+  expect(facts).toMatchObject({
+    assigned: [],
+    unattributed: ["192.0.2.9"],
+    incomplete: true,
+  });
+});
+
+it("does not attribute addresses on non-QUERY opcode", () => {
+  const query = label("612e62", "6578616d706c65");
+  const answer = rr(query, 1, address);
+  const bytes = Buffer.concat([
+    word(1),
+    word(0x9180), // QR=1, OPCODE=2 (STATUS)
+    word(1),
+    word(1),
+    word(0),
+    word(0),
+    query,
+    word(1),
+    word(1),
+    ...[answer],
+  ]);
+  const facts = parse(bytes);
+  expect(facts).toMatchObject({
+    assigned: [],
+    unattributed: ["192.0.2.9"],
+    incomplete: true,
+  });
+});
+
 const label = (...labels: readonly string[]): Buffer =>
   Buffer.concat([
     ...labels.map((hex) => {
