@@ -1,5 +1,20 @@
 # Changelog
 
+## [6.10.0](https://github.com/morluto/rea/compare/rea-agents-6.9.0...rea-agents-6.10.0) (2026-11-12)
+
+
+### Features
+
+* **setup:** expose explicit MCP catalog profile selection ([#9354](https://github.com/morluto/rea/issues/9354)) ([edc9304](https://github.com/morluto/rea/commit/edc93046692c120567553fb68390db6ec5bc98c7))
+
+
+### Bug Fixes
+
+* **ci:** defer proposals for merged release commits ([5eef239](https://github.com/morluto/rea/commit/5eef239dfd774331d622aaa4762f42fa632121ab))
+* **mcp:** record deferred schemas before protocol framing ([#9351](https://github.com/morluto/rea/issues/9351)) ([bed3f0b](https://github.com/morluto/rea/commit/bed3f0bcb5518bd8e086d95f5a9bab3bd064c096))
+* **release:** validate notes with the publication parser ([653c494](https://github.com/morluto/rea/commit/653c49419e65515d5567ebf13c0e6dd2ac794f7e))
+* **setup:** supply registration profile in catalog test ([a8527d4](https://github.com/morluto/rea/commit/a8527d43b8439476f5c9d1497315dfe7dd5e1f38))
+
 ## [6.9.0](https://github.com/morluto/rea/compare/rea-agents-6.8.0...rea-agents-6.9.0) (2026-11-11)
 
 ### Highlights
